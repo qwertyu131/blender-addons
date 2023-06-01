@@ -7,6 +7,8 @@ import numpy as np
 from ...io.imp.gltf2_io_user_extensions import import_user_extensions
 from ...io.com.gltf2_io_debug import print_console
 from ...io.imp.gltf2_io_binary import BinaryData
+from ...io.com.gltf2_io_constants import DataType, ComponentType
+from ...blender.com.gltf2_blender_conversion import get_attribute_type
 from ..com.gltf2_blender_extras import set_extras
 from .gltf2_blender_material import BlenderMaterial
 from .gltf2_io_draco_compression_extension import decode_primitive
@@ -253,10 +255,10 @@ def do_primitives(gltf, mesh_idx, skin_idx, mesh, ob):
 
     if gltf.import_settings['merge_vertices']:
         vert_locs, vert_normals, vert_joints, vert_weights, \
-        sk_vert_locs, loop_vidxs, edge_vidxs = \
+        sk_vert_locs, loop_vidxs, edge_vidxs, attribute_data = \
             merge_duplicate_verts(
                 vert_locs, vert_normals, vert_joints, vert_weights, \
-                sk_vert_locs, loop_vidxs, edge_vidxs\
+                sk_vert_locs, loop_vidxs, edge_vidxs, attribute_data\
             )
 
     # ---------------
@@ -594,7 +596,22 @@ def skin_into_bind_pose(gltf, skin_idx, vert_joints, vert_weights, locs, vert_no
         for i in range(4):
             skinning_mats += ws[:, i].reshape(len(ws), 1, 1) * joint_mats[js[:, i]]
             weight_sums += ws[:, i]
-    # Normalize weights to one; necessary for old files / quantized weights
+
+    # Some invalid files have 0 weight sum.
+    # To avoid to have this vertices at 0.0 / 0.0 / 0.0
+    # We set all weight ( aka 1.0 ) to the first bone
+    zeros_indices = np.where(weight_sums == 0)[0]
+    if zeros_indices.shape[0] > 0:
+        print_console('ERROR', 'File is invalid: Some vertices are not assigned to bone(s) ')
+        vert_weights[0][:, 0][zeros_indices] = 1.0 # Assign to first bone with all weight
+
+        # Reprocess IBM for these vertices
+        skinning_mats[zeros_indices] = np.zeros((4, 4), dtype=np.float32)
+        for js, ws in zip(vert_joints, vert_weights):
+            for i in range(4):
+                skinning_mats[zeros_indices] += ws[:, i][zeros_indices].reshape(len(ws[zeros_indices]), 1, 1) * joint_mats[js[:, i][zeros_indices]]
+                weight_sums[zeros_indices] += ws[:, i][zeros_indices]
+
     skinning_mats /= weight_sums.reshape(num_verts, 1, 1)
 
     skinning_mats_3x3 = skinning_mats[:, :3, :3]
@@ -683,7 +700,7 @@ def set_poly_smoothing(gltf, pymesh, mesh, vert_normals, loop_vidxs):
     mesh.polygons.foreach_set('use_smooth', poly_smooths)
 
 
-def merge_duplicate_verts(vert_locs, vert_normals, vert_joints, vert_weights, sk_vert_locs, loop_vidxs, edge_vidxs):
+def merge_duplicate_verts(vert_locs, vert_normals, vert_joints, vert_weights, sk_vert_locs, loop_vidxs, edge_vidxs, attribute_data):
     # This function attempts to invert the splitting done when exporting to
     # glTF. Welds together verts with the same per-vert data (but possibly
     # different per-loop data).
@@ -738,10 +755,16 @@ def merge_duplicate_verts(vert_locs, vert_normals, vert_joints, vert_weights, sk
         dots['sk%dy' % i] = locs[:, 1]
         dots['sk%dz' % i] = locs[:, 2]
 
-    unique_dots, inv_indices = np.unique(dots, return_inverse=True)
+    unique_dots, unique_ind, inv_indices = np.unique(dots, return_index=True, return_inverse=True)
 
     loop_vidxs = inv_indices[loop_vidxs]
     edge_vidxs = inv_indices[edge_vidxs]
+
+    # We don't split vertices only because of custom attribute
+    # If 2 vertices have same data (pos, normals, etc...) except custom attribute, we
+    # keep 1 custom attribute, arbitrary
+    for idx, i in enumerate(attribute_data):
+        attribute_data[idx] = attribute_data[idx][unique_ind]
 
     vert_locs = np.empty((len(unique_dots), 3), dtype=np.float32)
     vert_locs[:, 0] = unique_dots['x']
@@ -769,4 +792,4 @@ def merge_duplicate_verts(vert_locs, vert_normals, vert_joints, vert_weights, sk
         sk_vert_locs[i][:, 1] = unique_dots['sk%dy' % i]
         sk_vert_locs[i][:, 2] = unique_dots['sk%dz' % i]
 
-    return vert_locs, vert_normals, vert_joints, vert_weights, sk_vert_locs, loop_vidxs, edge_vidxs
+    return vert_locs, vert_normals, vert_joints, vert_weights, sk_vert_locs, loop_vidxs, edge_vidxs, attribute_data

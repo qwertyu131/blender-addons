@@ -4,6 +4,7 @@
 import bpy
 from typing import Optional, Dict, List, Any, Tuple
 from ...io.com import gltf2_io
+from ...blender.com.gltf2_blender_data_path import get_sk_exported
 from ...io.com.gltf2_io_debug import print_console
 from ...io.exp.gltf2_io_user_extensions import export_user_extensions
 from ..com.gltf2_blender_extras import generate_extras
@@ -14,7 +15,6 @@ def get_mesh_cache_key(blender_mesh,
                 blender_object,
                 vertex_groups,
                 modifiers,
-                skip_filter,
                 materials,
                 original_mesh,
                 export_settings):
@@ -34,21 +34,19 @@ def get_mesh_cache_key(blender_mesh,
     return (
         (id(mesh_to_id_cache),),
         (modifiers,),
-        (skip_filter,),             #TODO to check if still needed
         mats
     )
 
 @cached_by_key(key=get_mesh_cache_key)
 def gather_mesh(blender_mesh: bpy.types.Mesh,
                 uuid_for_skined_data,
-                vertex_groups: Optional[bpy.types.VertexGroups],
+                vertex_groups: bpy.types.VertexGroups,
                 modifiers: Optional[bpy.types.ObjectModifiers],
-                skip_filter: bool,
                 materials: Tuple[bpy.types.Material],
                 original_mesh: bpy.types.Mesh,
                 export_settings
                 ) -> Optional[gltf2_io.Mesh]:
-    if not skip_filter and not __filter_mesh(blender_mesh, vertex_groups, modifiers, export_settings):
+    if not __filter_mesh(blender_mesh, vertex_groups, modifiers, export_settings):
         return None
 
     mesh = gltf2_io.Mesh(
@@ -75,25 +73,21 @@ def gather_mesh(blender_mesh: bpy.types.Mesh,
                            blender_object,
                            vertex_groups,
                            modifiers,
-                           skip_filter,
                            materials)
 
     return mesh
 
 
 def __filter_mesh(blender_mesh: bpy.types.Mesh,
-                  vertex_groups: Optional[bpy.types.VertexGroups],
+                  vertex_groups: bpy.types.VertexGroups,
                   modifiers: Optional[bpy.types.ObjectModifiers],
                   export_settings
                   ) -> bool:
-
-    if blender_mesh.users == 0:
-        return False
     return True
 
 
 def __gather_extensions(blender_mesh: bpy.types.Mesh,
-                        vertex_groups: Optional[bpy.types.VertexGroups],
+                        vertex_groups: bpy.types.VertexGroups,
                         modifiers: Optional[bpy.types.ObjectModifiers],
                         export_settings
                         ) -> Any:
@@ -101,7 +95,7 @@ def __gather_extensions(blender_mesh: bpy.types.Mesh,
 
 
 def __gather_extras(blender_mesh: bpy.types.Mesh,
-                    vertex_groups: Optional[bpy.types.VertexGroups],
+                    vertex_groups: bpy.types.VertexGroups,
                     modifiers: Optional[bpy.types.ObjectModifiers],
                     export_settings
                     ) -> Optional[Dict[Any, Any]]:
@@ -114,12 +108,7 @@ def __gather_extras(blender_mesh: bpy.types.Mesh,
     if export_settings['gltf_morph'] and blender_mesh.shape_keys:
         morph_max = len(blender_mesh.shape_keys.key_blocks) - 1
         if morph_max > 0:
-            target_names = []
-            for blender_shape_key in blender_mesh.shape_keys.key_blocks:
-                if blender_shape_key != blender_shape_key.relative_key:
-                    if blender_shape_key.mute is False:
-                        target_names.append(blender_shape_key.name)
-            extras['targetNames'] = target_names
+            extras['targetNames'] = [k.name for k in get_sk_exported(blender_mesh.shape_keys.key_blocks)]
 
     if extras:
         return extras
@@ -128,7 +117,7 @@ def __gather_extras(blender_mesh: bpy.types.Mesh,
 
 
 def __gather_name(blender_mesh: bpy.types.Mesh,
-                  vertex_groups: Optional[bpy.types.VertexGroups],
+                  vertex_groups: bpy.types.VertexGroups,
                   modifiers: Optional[bpy.types.ObjectModifiers],
                   export_settings
                   ) -> str:
@@ -137,7 +126,7 @@ def __gather_name(blender_mesh: bpy.types.Mesh,
 
 def __gather_primitives(blender_mesh: bpy.types.Mesh,
                         uuid_for_skined_data,
-                        vertex_groups: Optional[bpy.types.VertexGroups],
+                        vertex_groups: bpy.types.VertexGroups,
                         modifiers: Optional[bpy.types.ObjectModifiers],
                         materials: Tuple[bpy.types.Material],
                         export_settings
@@ -151,7 +140,7 @@ def __gather_primitives(blender_mesh: bpy.types.Mesh,
 
 
 def __gather_weights(blender_mesh: bpy.types.Mesh,
-                     vertex_groups: Optional[bpy.types.VertexGroups],
+                     vertex_groups: bpy.types.VertexGroups,
                      modifiers: Optional[bpy.types.ObjectModifiers],
                      export_settings
                      ) -> Optional[List[float]]:
@@ -162,11 +151,4 @@ def __gather_weights(blender_mesh: bpy.types.Mesh,
     if morph_max <= 0:
         return None
 
-    weights = []
-
-    for blender_shape_key in blender_mesh.shape_keys.key_blocks:
-        if blender_shape_key != blender_shape_key.relative_key:
-            if blender_shape_key.mute is False:
-                weights.append(blender_shape_key.value)
-
-    return weights
+    return [k.value for k in get_sk_exported(blender_mesh.shape_keys.key_blocks)]

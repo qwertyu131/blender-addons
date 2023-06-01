@@ -62,7 +62,7 @@ def pose_library_list_item_context_menu(self: UIList, context: Context) -> None:
         list = getattr(context, "ui_list", None)
         if not list or list.bl_idname != "UI_UL_asset_view" or list.list_id != "pose_assets":
             return False
-        if not context.asset_handle:
+        if not context.active_file:
             return False
         return True
 
@@ -229,3 +229,4 @@ def unregister() -> None:
 
     bpy.types.UI_MT_list_item_context_menu.remove(pose_library_list_item_context_menu)
     bpy.types.ASSETBROWSER_MT_context_menu.remove(pose_library_list_item_context_menu)
+    bpy.types.ASSETBROWSER_MT_editor_menus.remove(pose_library_list_item_asset_menu)

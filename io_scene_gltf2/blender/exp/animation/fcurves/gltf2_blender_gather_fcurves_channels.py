@@ -4,6 +4,7 @@
 import bpy
 import typing
 from .....io.exp.gltf2_io_user_extensions import export_user_extensions
+from .....blender.com.gltf2_blender_data_path import skip_sk
 from .....io.com import gltf2_io_debug
 from .....io.com import gltf2_io
 from ....exp.gltf2_blender_gather_cache import cached
@@ -74,7 +75,7 @@ def get_channel_groups(obj_uuid: str, blender_action: bpy.types.Action, export_s
                 type_ = "BONE"
                 if blender_object.type == "MESH" and object_path.startswith("key_blocks"):
                     shape_key = blender_object.data.shape_keys.path_resolve(object_path)
-                    if shape_key.mute is True:
+                    if skip_sk(shape_key):
                         continue
                     target = blender_object.data.shape_keys
                     type_ = "SK"
@@ -84,7 +85,7 @@ def get_channel_groups(obj_uuid: str, blender_action: bpy.types.Action, export_s
                 if blender_object.type == "MESH":
                     try:
                         shape_key = blender_object.data.shape_keys.path_resolve(object_path)
-                        if shape_key.mute is True:
+                        if skip_sk(shape_key):
                             continue
                         target = blender_object.data.shape_keys
                         type_ = "SK"
@@ -143,7 +144,7 @@ def get_channel_groups(obj_uuid: str, blender_action: bpy.types.Action, export_s
         # Check if the property can be exported without sampling
         new_properties = {}
         for prop in target_data['properties'].keys():
-            if __needs_baking(obj_uuid, target_data['properties'][prop], export_settings) is True:
+            if needs_baking(obj_uuid, target_data['properties'][prop], export_settings) is True:
                 to_be_sampled.append((obj_uuid, target_data['type'], get_channel_from_target(get_target(prop)), target_data['bone'])) # bone can be None if not a bone :)
             else:
                 new_properties[prop] = target_data['properties'][prop]
@@ -179,9 +180,7 @@ def __get_channel_group_sorted(channels: typing.Tuple[bpy.types.FCurve], blender
             shapekeys_idx = {}
             cpt_sk = 0
             for sk in blender_object.data.shape_keys.key_blocks:
-                if sk == sk.relative_key:
-                    continue
-                if sk.mute is True:
+                if skip_sk(sk):
                     continue
                 shapekeys_idx[sk.name] = cpt_sk
                 cpt_sk += 1
@@ -262,7 +261,7 @@ def __gather_sampler(obj_uuid: str,
 
     return gather_animation_fcurves_sampler(obj_uuid, channel_group, bone, custom_range, export_settings)
 
-def __needs_baking(obj_uuid: str,
+def needs_baking(obj_uuid: str,
                  channels: typing.Tuple[bpy.types.FCurve],
                  export_settings
                  ) -> bool:

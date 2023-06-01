@@ -6,6 +6,7 @@ from typing import List, Optional, Tuple
 import numpy as np
 from ...io.com import gltf2_io, gltf2_io_constants, gltf2_io_extensions
 from ...io.com.gltf2_io_debug import print_console
+from ...blender.com.gltf2_blender_data_path import get_sk_exported
 from ...io.exp import gltf2_io_binary_data
 from .gltf2_blender_gather_cache import cached, cached_by_key
 from . import gltf2_blender_gather_primitives_extract
@@ -15,9 +16,9 @@ from .material import gltf2_blender_gather_materials
 from .material.extensions import gltf2_blender_gather_materials_variants
 
 @cached
-def get_primitive_cache_key(
+def gather_primitive_cache_key(
         blender_mesh,
-        blender_object,
+        uuid_for_skined_data,
         vertex_groups,
         modifiers,
         materials,
@@ -36,11 +37,11 @@ def get_primitive_cache_key(
     )
 
 
-@cached_by_key(key=get_primitive_cache_key)
+@cached_by_key(key=gather_primitive_cache_key)
 def gather_primitives(
         blender_mesh: bpy.types.Mesh,
         uuid_for_skined_data,
-        vertex_groups: Optional[bpy.types.VertexGroups],
+        vertex_groups: bpy.types.VertexGroups,
         modifiers: Optional[bpy.types.ObjectModifiers],
         materials: Tuple[bpy.types.Material],
         export_settings
@@ -92,11 +93,33 @@ def gather_primitives(
 
     return primitives
 
+
 @cached
+def get_primitive_cache_key(
+        blender_mesh,
+        uuid_for_skined_data,
+        vertex_groups,
+        modifiers,
+        export_settings):
+
+    # Use id of mesh
+    # Do not use bpy.types that can be unhashable
+    # Do not use mesh name, that can be not unique (when linked)
+    # Do not use materials here
+
+    # TODO check what is really needed for modifiers
+
+    return (
+        (id(blender_mesh),),
+        (modifiers,)
+    )
+
+
+@cached_by_key(key=get_primitive_cache_key)
 def __gather_cache_primitives(
         blender_mesh: bpy.types.Mesh,
         uuid_for_skined_data,
-        vertex_groups: Optional[bpy.types.VertexGroups],
+        vertex_groups: bpy.types.VertexGroups,
         modifiers: Optional[bpy.types.ObjectModifiers],
         export_settings
 ) -> List[dict]:
@@ -164,12 +187,7 @@ def __gather_targets(blender_primitive, blender_mesh, modifiers, export_settings
         targets = []
         if blender_mesh.shape_keys is not None:
             morph_index = 0
-            for blender_shape_key in blender_mesh.shape_keys.key_blocks:
-                if blender_shape_key == blender_shape_key.relative_key:
-                    continue
-
-                if blender_shape_key.mute is True:
-                    continue
+            for blender_shape_key in get_sk_exported(blender_mesh.shape_keys.key_blocks):
 
                 target_position_id = 'MORPH_POSITION_' + str(morph_index)
                 target_normal_id = 'MORPH_NORMAL_' + str(morph_index)

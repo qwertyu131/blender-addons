@@ -3,6 +3,7 @@
 
 import numpy as np
 from mathutils import Vector
+from ...blender.com.gltf2_blender_data_path import get_sk_exported
 from ...io.com.gltf2_io_debug import print_console
 from ...io.com.gltf2_io_constants import NORMALS_ROUNDING_DIGIT
 from ...io.exp.gltf2_io_user_extensions import export_user_extensions
@@ -85,7 +86,7 @@ class PrimitiveCreator:
         # Check if we have to export skin
         self.armature = None
         self.skin = None
-        if self.blender_vertex_groups and self.export_settings['gltf_skins']:
+        if self.export_settings['gltf_skins']:
             if self.modifiers is not None:
                 modifiers_dict = {m.type: m for m in self.modifiers}
                 if "ARMATURE" in modifiers_dict:
@@ -110,12 +111,9 @@ class PrimitiveCreator:
                     self.armature = None
 
         self.key_blocks = []
+        # List of SK that are going to be exported, actually
         if self.blender_mesh.shape_keys and self.export_settings['gltf_morph']:
-            self.key_blocks = [
-                key_block
-                for key_block in self.blender_mesh.shape_keys.key_blocks
-                if not (key_block == key_block.relative_key or key_block.mute)
-            ]
+            self.key_blocks = get_sk_exported(self.blender_mesh.shape_keys.key_blocks)
 
         # Fetch vert positions and bone data (joint,weights)
 
@@ -169,6 +167,12 @@ class PrimitiveCreator:
                 attr['gltf_attribute_name'] = 'COLOR_0'
                 attr['get'] = self.get_function()
 
+                # Seems we sometime can have name collision about attributes
+                # Avoid crash and ignoring one of duplicated attribute name
+                if 'COLOR_0' in [a['gltf_attribute_name'] for a in self.blender_attributes]:
+                    print_console('WARNING', 'Attribute (vertex color) collision name: ' + blender_attribute.name + ", ignoring one of them")
+                    continue
+
             else:
                 # Custom attributes
                 # Keep only attributes that starts with _
@@ -186,6 +190,12 @@ class PrimitiveCreator:
                 attr['gltf_attribute_name'] = keep_attribute.attr_name.upper()
                 attr['get'] = self.get_function()
 
+                # Seems we sometime can have name collision about attributes
+                # Avoid crash and ignoring one of duplicated attribute name
+                if attr['gltf_attribute_name'] in [a['gltf_attribute_name'] for a in self.blender_attributes]:
+                    print_console('WARNING', 'Attribute collision name: ' + blender_attribute.name + ", ignoring one of them")
+                    continue
+
             self.blender_attributes.append(attr)
 
         # Manage POSITION
@@ -197,15 +207,6 @@ class PrimitiveCreator:
         attr['skip_getting_to_dots'] = True
         self.blender_attributes.append(attr)
 
-        # Manage uvs TEX_COORD_x
-        for tex_coord_i in range(self.tex_coord_max):
-            attr = {}
-            attr['blender_data_type'] = 'FLOAT2'
-            attr['blender_domain'] = 'CORNER'
-            attr['gltf_attribute_name'] = 'TEXCOORD_' + str(tex_coord_i)
-            attr['get'] = self.get_function()
-            self.blender_attributes.append(attr)
-
         # Manage NORMALS
         if self.use_normals:
             attr = {}
@@ -213,6 +214,15 @@ class PrimitiveCreator:
             attr['blender_domain'] = 'CORNER'
             attr['gltf_attribute_name'] = 'NORMAL'
             attr['gltf_attribute_name_morph'] = 'MORPH_NORMAL_'
+            attr['get'] = self.get_function()
+            self.blender_attributes.append(attr)
+
+        # Manage uvs TEX_COORD_x
+        for tex_coord_i in range(self.tex_coord_max):
+            attr = {}
+            attr['blender_data_type'] = 'FLOAT2'
+            attr['blender_domain'] = 'CORNER'
+            attr['gltf_attribute_name'] = 'TEXCOORD_' + str(tex_coord_i)
             attr['get'] = self.get_function()
             self.blender_attributes.append(attr)
 
@@ -268,6 +278,13 @@ class PrimitiveCreator:
         for attr in self.blender_attributes:
             attr['len'] = gltf2_blender_conversion.get_data_length(attr['blender_data_type'])
             attr['type'] = gltf2_blender_conversion.get_numpy_type(attr['blender_data_type'])
+
+
+        # Now we have all attribtues, we can change order if we want
+        # Note that the glTF specification doesn't say anything about order
+        # Attributes are defined only by name
+        # But if user want it in a particular order, he can use this hook to perform it
+        export_user_extensions('gather_attributes_change', self.export_settings, self.blender_attributes)
 
     def create_dots_data_structure(self):
         # Now that we get all attributes that are going to be exported, create numpy array that will store them
@@ -698,6 +715,8 @@ class PrimitiveCreator:
         self.normals = self.normals.reshape(len(self.blender_mesh.loops), 3)
 
         self.normals = np.round(self.normals, NORMALS_ROUNDING_DIGIT)
+        # Force normalization of normals in case some normals are not (why ?)
+        PrimitiveCreator.normalize_vecs(self.normals)
 
         self.morph_normals = []
         for key_block in key_blocks:
